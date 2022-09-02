@@ -1,0 +1,19 @@
+[package]
+name = "wwebs"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+serde = {version = "1.0.144", features = ["derive"]}
+url = {version = "2.2.2", features = ["serde"]}
+async-trait = "0.1.57"
+tokio = {version = "1.20.1", features = ["full"]}
+anyhow = "1.0.63"
+toml = {verson = "0.5.9"}
+hyper = {version = "*", optional = true, features = ["full"]}
+
+[features]
+default = ["http"]
+http = ["hyper"]
