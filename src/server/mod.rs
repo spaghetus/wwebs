@@ -78,7 +78,7 @@ impl Server {
 				env: Some({
 					let mut env: Vec<(OsString, OsString)> = vec![];
 					for (k, v) in &request.headers {
-						env.push((k.into(), v.into()));
+						env.push((("HEADER_".to_string() + k).into(), v.into()));
 					}
 					env.push(("VERB".into(), request.verb.clone().into()));
 					for (k, v) in config.env.as_ref().unwrap_or(&HashMap::default()) {
@@ -100,7 +100,10 @@ impl Server {
 		// Write the request body, and store the response.
 		let (stdout, stderr) = match p.communicate_bytes(Some(&request.body)) {
 			Ok((a, b)) => (a.unwrap_or_default(), b.unwrap_or_default()),
-			_ => return Response::internal_server_error(),
+			Err(e) => {
+				eprintln!("{:?}", e);
+				return Response::internal_server_error();
+			}
 		};
 
 		// Wait for p to exit...
@@ -111,30 +114,17 @@ impl Server {
 			status: match exit_status {
 				#[allow(clippy::cast_possible_truncation)]
 				subprocess::ExitStatus::Exited(n) => n as u16,
-				_ => 500,
+				v => {
+					eprintln!("{:?}", v);
+					500
+				}
 			},
 			headers: HashMap::default(),
 			body: stdout,
 		};
 
 		// Parse the stderr...
-		for line in String::from_utf8(stderr)
-			.unwrap_or_else(|_| String::default())
-			.lines()
-		{
-			if line.starts_with("log ") {
-				eprintln!("{}", line.strip_prefix("log ").unwrap_or("???"));
-			} else if line.starts_with("header ") {
-				let _res: Option<()> = (|| {
-					let pair = line.strip_prefix("header ")?;
-					let split = pair.find(' ')?;
-					let key = &pair[..split];
-					let value = &pair[1 + split..];
-					response.headers.insert(key.to_string(), value.to_string());
-					Some(())
-				})();
-			}
-		}
+		parse_output_commands(&stderr, &mut response);
 
 		response
 	}
@@ -376,5 +366,28 @@ impl Server {
 			})();
 			config_res.unwrap_or_else(|_| config.clone())
 		};
+	}
+}
+
+fn parse_output_commands(stderr: &[u8], response: &mut Response) {
+	for line in String::from_utf8(stderr.to_vec())
+		.unwrap_or_else(|_| String::default())
+		.lines()
+	{
+		if line.starts_with("log ") {
+			eprintln!("{}", line.strip_prefix("log ").unwrap_or("???"));
+		} else if line.starts_with("header ") {
+			let _res: Option<()> = (|| {
+				let pair = line.strip_prefix("header ")?;
+				let split = pair.find(' ')?;
+				let key = &pair[..split];
+				let value = &pair[1 + split..];
+				response.headers.insert(key.to_string(), value.to_string());
+				Some(())
+			})();
+		} else if line.starts_with("status ") {
+			let status = line.strip_prefix("status ").unwrap().parse().unwrap_or(500);
+			response.status = status;
+		}
 	}
 }

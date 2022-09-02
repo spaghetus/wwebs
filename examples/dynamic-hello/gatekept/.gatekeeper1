@@ -1,0 +1,9 @@
+#!/bin/bash
+
+if echo "$1" | grep "beans" > /dev/null; then
+	echo "OK"
+	exit 0
+else
+	>&2 echo "header Location /gatekept/index.html/beans"
+	>&2 echo "status 302"
+fi
