@@ -66,8 +66,8 @@ impl HttpServer {
 			verb: r.method().to_string(),
 			url: {
 				let uri = r.uri();
-				let url = Url::parse(&uri.to_string())
-					.unwrap_or_else(|_| Url::parse("http://localhost/").unwrap());
+				let mut url = Url::parse("http://localhost/").unwrap();
+				url.set_path(&uri.to_string());
 				url
 			},
 			headers: {

@@ -40,7 +40,7 @@ impl Server {
 			.url
 			.path_segments()
 			.expect("Unexpected cannot-be-a-base url")
-			.take(segment + 1)
+			.take(segment)
 			.collect();
 
 		// Make the path absolute
@@ -103,7 +103,7 @@ impl Server {
 			}
 			// If the target is a directory and we are at the end, rewrite it to use the index.
 			if response.is_ok()
-				&& request.url.path_segments().unwrap().count() == segment + 1
+				&& request.url.path_segments().unwrap().count() == segment
 				&& path.is_dir()
 			{
 				let index = config
