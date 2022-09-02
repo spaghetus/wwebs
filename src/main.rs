@@ -1,5 +1,5 @@
 use wwebs::{
-	http::{HttpConfig, HttpServer},
+	http::{Http, HttpConfig},
 	server::Server,
 	traits::Protocol,
 };
@@ -8,7 +8,7 @@ fn main() {
 	let workdir = std::env::current_dir().unwrap();
 	let server = Server::new(workdir);
 
-	let mut http = HttpServer;
+	let mut http = Http;
 	let rt = tokio::runtime::Runtime::new().expect("failed to start runtime");
 	let fut = http.run(
 		HttpConfig {

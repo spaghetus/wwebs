@@ -1,17 +1,20 @@
-//! The default backend for wwebs.
+//! The backend for wwebs.
 
 use std::{
 	collections::HashMap,
-	fs::File,
+	ffi::OsString,
 	os::unix::prelude::PermissionsExt,
 	path::{Path, PathBuf},
 };
+
+use subprocess::{Popen, PopenConfig};
 
 use crate::{
 	files::wwebs::WWebS,
 	structures::{Request, Response},
 };
 
+/// The backend server for wwebs.
 #[derive(Clone)]
 pub struct Server {
 	workdir: PathBuf,
@@ -25,9 +28,115 @@ impl Server {
 	}
 
 	/// Run a CGI binary. Don't call this on a static file, it won't go well.
+	/// # Panics
+	/// Panics if the path is empty.
 	#[must_use]
 	pub fn run_cgi(&self, request: &mut Request, path: &Path, config: &WWebS) -> Response {
-		Response::default()
+		// Make path relative
+		let rel_path = path.strip_prefix(&self.workdir).unwrap();
+		// Determine the path "inside" the target CGI binary
+		let inside_path: PathBuf =
+			if rel_path.components().count() < request.url.path_segments().unwrap().count() {
+				// There is indeed a path inside the CGI binary
+				let mut path_starts = rel_path.components().count();
+				let last_component = rel_path
+					.components()
+					.last()
+					.unwrap()
+					.as_os_str()
+					.to_string_lossy()
+					.to_string();
+				if [
+					".gatekeeper",
+					".req_transformer",
+					".logger",
+					".res_transformer",
+				]
+				.contains(&last_component.as_str())
+				{
+					path_starts -= 1;
+				}
+
+				request
+					.url
+					.path_segments()
+					.unwrap()
+					.skip(path_starts)
+					.collect()
+			} else {
+				PathBuf::default()
+			};
+		let inside_path = inside_path.to_string_lossy().to_string();
+
+		let p = Popen::create(
+			&[path.to_string_lossy().to_string(), inside_path],
+			PopenConfig {
+				stdin: subprocess::Redirection::Pipe,
+				stdout: subprocess::Redirection::Pipe,
+				stderr: subprocess::Redirection::Pipe,
+				cwd: Some(path.parent().unwrap().as_os_str().to_os_string()),
+				env: Some({
+					let mut env: Vec<(OsString, OsString)> = vec![];
+					for (k, v) in &request.headers {
+						env.push((k.into(), v.into()));
+					}
+					env.push(("VERB".into(), request.verb.clone().into()));
+					for (k, v) in config.env.as_ref().unwrap_or(&HashMap::default()) {
+						env.push((k.into(), v.clone().into()));
+					}
+					env
+				}),
+				..Default::default()
+			},
+		);
+
+		if let Err(e) = p {
+			eprintln!("{}", e);
+			return Response::internal_server_error();
+		}
+
+		let mut p = p.unwrap();
+
+		// Write the request body, and store the response.
+		let (stdout, stderr) = match p.communicate_bytes(Some(&request.body)) {
+			Ok((a, b)) => (a.unwrap_or_default(), b.unwrap_or_default()),
+			_ => return Response::internal_server_error(),
+		};
+
+		// Wait for p to exit...
+		let exit_status = p.wait().unwrap_or(subprocess::ExitStatus::Exited(500));
+
+		// Build the response.
+		let mut response = Response {
+			status: match exit_status {
+				#[allow(clippy::cast_possible_truncation)]
+				subprocess::ExitStatus::Exited(n) => n as u16,
+				_ => 500,
+			},
+			headers: HashMap::default(),
+			body: stdout,
+		};
+
+		// Parse the stderr...
+		for line in String::from_utf8(stderr)
+			.unwrap_or_else(|_| String::default())
+			.lines()
+		{
+			if line.starts_with("log ") {
+				eprintln!("{}", line.strip_prefix("log ").unwrap_or("???"));
+			} else if line.starts_with("header ") {
+				let _res: Option<()> = (|| {
+					let pair = line.strip_prefix("header ")?;
+					let split = pair.find(' ')?;
+					let key = &pair[..split];
+					let value = &pair[1 + split..];
+					response.headers.insert(key.to_string(), value.to_string());
+					Some(())
+				})();
+			}
+		}
+
+		response
 	}
 
 	/// Execute a given path segment from a request.
@@ -44,7 +153,7 @@ impl Server {
 			.collect();
 
 		// Make the path absolute
-		let mut path = self.workdir.join(path);
+		let path = self.workdir.join(path);
 		let mut config = config.clone();
 
 		// Check that the path exists.
@@ -96,10 +205,10 @@ impl Server {
 			// Extend config if possible
 			Self::extend_config(&mut config, &path);
 			// Evaluate all of the gatekeepers
-			self.eval_gatekeepers(&files, &path, request, &mut config, &mut response);
+			self.eval_gatekeepers(&files, &path, request, &config, &mut response);
 			// Execute all of the request transformers, but only if the response isn't already bad.
 			if response.is_ok() {
-				self.eval_req_transformers(&files, &path, request, &mut config);
+				self.eval_req_transformers(&files, &path, request, &config);
 			}
 			// If the target is a directory and we are at the end, rewrite it to use the index.
 			if response.is_ok()
@@ -118,19 +227,44 @@ impl Server {
 		if response.is_ok() {
 			// Is the target a file?
 			if path.is_file() {
-				response = self.run_file(exec, &path, request, &mut config);
+				response = self.run_file(exec, &path, request, &config);
 			} else {
 				// The target is a directory, so we move into it.
 				response = self.exec(request, segment + 1, &mut config);
 			}
 		}
 		if path.is_dir() {
-			self.eval_res_transformers(&files, &path, &mut config, &mut response, request);
+			self.eval_res_transformers(&files, &path, &config, &mut response, request);
 		}
 		if response.status == 0 {
 			response.status = 200;
 		}
+		// Run the loggers.
+		self.run_loggers(&files, &path, &config, &response, request);
 		response
+	}
+
+	fn run_loggers(
+		&self,
+		files: &[String],
+		path: &Path,
+		config: &WWebS,
+		response: &Response,
+		request: &mut Request,
+	) {
+		// Get the list of loggers.
+		let mut loggers: Vec<&String> = files.iter().filter(|v| v.starts_with(".logger")).collect();
+		loggers.sort();
+		// Execute all of the response transformers.
+		for logger in loggers {
+			let path = path.join(logger);
+			let mut extended_config = config.clone();
+			extended_config
+				.env
+				.get_or_insert(HashMap::default())
+				.insert("STATUS".to_string(), response.status.to_string());
+			let _res = self.run_cgi(&mut request.clone(), &path, &extended_config);
+		}
 	}
 
 	fn eval_res_transformers(
@@ -242,16 +376,5 @@ impl Server {
 			})();
 			config_res.unwrap_or_else(|_| config.clone())
 		};
-	}
-}
-
-impl Server {
-	async fn process_request<RE: Into<Request> + Send, RS: From<Response> + Send>(
-		&self,
-		request: RE,
-	) -> RS {
-		let request: Request = request.into();
-
-		todo!();
 	}
 }

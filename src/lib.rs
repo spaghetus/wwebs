@@ -27,4 +27,5 @@ pub mod structures {
 pub mod server;
 
 #[cfg(feature = "http")]
+/// The module implementing HTTP support in wwebs.
 pub mod http;

@@ -21,4 +21,14 @@ impl Response {
 	pub fn is_ok(&self) -> bool {
 		self.status == 0 || (200..300).contains(&self.status)
 	}
+
+	/// Helper to generate an HTTP 500 response.
+	#[must_use]
+	pub fn internal_server_error() -> Response {
+		Response {
+			status: 500,
+			body: b"INTERNAL SERVER ERROR".to_vec(),
+			..Default::default()
+		}
+	}
 }

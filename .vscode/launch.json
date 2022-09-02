@@ -39,7 +39,7 @@
 				}
 			},
 			"args": [],
-			"cwd": "${workspaceFolder}/examples/static-hello"
+			"cwd": "${workspaceFolder}/examples/dynamic-hello"
 		},
 		{
 			"type": "lldb",

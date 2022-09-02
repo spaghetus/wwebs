@@ -1,4 +1,4 @@
-use std::{convert::Infallible, net::SocketAddr, sync::Arc};
+use std::{convert::Infallible, net::SocketAddr};
 
 use crate::{
 	files::wwebs::WWebS,
@@ -6,21 +6,24 @@ use crate::{
 	structures::{Request as WWebSRequest, Response as WWebSResponse},
 	traits::Protocol,
 };
+use hyper::server::conn::AddrStream;
 use hyper::{
 	body::Bytes,
-	http::request,
-	server::conn::Http,
 	service::{make_service_fn, service_fn},
 };
-use hyper::{server::conn::AddrStream, service::Service};
 use hyper::{Body, Request, Response, Server};
-use std::net::TcpListener;
 use url::Url;
 
-pub struct HttpServer;
+/// The marker struct for the HTTP protocol implementation.
+#[allow(clippy::module_name_repetitions)]
+pub struct Http;
 
+/// The configuration struct for the HTTP protocol implementation.
+#[allow(clippy::module_name_repetitions)]
 pub struct HttpConfig {
+	/// The ipv4 address on which to listen.
 	pub ip: [u8; 4],
+	/// The TCP port on which to listen.
 	pub port: u16,
 }
 
@@ -34,7 +37,7 @@ impl Default for HttpConfig {
 }
 
 #[async_trait::async_trait]
-impl Protocol for HttpServer {
+impl Protocol for Http {
 	type Request = WWebSRequest;
 	type Response = WWebSResponse;
 
@@ -52,22 +55,20 @@ impl Protocol for HttpServer {
 			}
 		});
 
-		let server;
-
-		server = Server::bind(&addr).serve(make_svc);
+		let server = Server::bind(&addr).serve(make_svc);
 		server.await?;
 		Ok(())
 	}
 }
 
-impl HttpServer {
+impl Http {
 	async fn handle(server: WWebSServer, r: Request<Body>) -> Result<Response<Body>, Infallible> {
 		let mut request = WWebSRequest {
 			verb: r.method().to_string(),
 			url: {
-				let uri = r.uri();
+				let http_uri = r.uri();
 				let mut url = Url::parse("http://localhost/").unwrap();
-				url.set_path(&uri.to_string());
+				url.set_path(&http_uri.to_string());
 				url
 			},
 			headers: {
