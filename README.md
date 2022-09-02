@@ -1,6 +1,6 @@
 # wwebs - Willow's Web Server
 
-wwebs is a CGI-first web server.
+wwebs is a weird (but hopefully not too weird) webserver.
 
 ## how wwebs works
 
