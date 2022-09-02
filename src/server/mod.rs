@@ -81,6 +81,7 @@ impl Server {
 						env.push((("HEADER_".to_string() + k).into(), v.into()));
 					}
 					env.push(("VERB".into(), request.verb.clone().into()));
+					env.push(("REQUESTED".into(), request.url.path().into()));
 					for (k, v) in config.env.as_ref().unwrap_or(&HashMap::default()) {
 						env.push((k.into(), v.clone().into()));
 					}
