@@ -39,7 +39,7 @@
 				}
 			},
 			"args": [],
-			"cwd": "${workspaceFolder}/examples/dynamic-hello"
+			"cwd": "${workspaceFolder}/../wwebs-ethsbell/web"
 		},
 		{
 			"type": "lldb",

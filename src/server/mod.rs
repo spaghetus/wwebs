@@ -85,6 +85,9 @@ impl Server {
 					for (k, v) in config.env.as_ref().unwrap_or(&HashMap::default()) {
 						env.push((k.into(), v.clone().into()));
 					}
+					if let Ok(path) = std::env::var("PATH") {
+						env.push(("PATH".into(), path.into()));
+					}
 					env
 				}),
 				..Default::default()
@@ -113,6 +116,7 @@ impl Server {
 		// Build the response.
 		let mut response = Response {
 			status: match exit_status {
+				subprocess::ExitStatus::Exited(0) => 200,
 				#[allow(clippy::cast_possible_truncation)]
 				subprocess::ExitStatus::Exited(n) => n as u16,
 				v => {
@@ -276,13 +280,24 @@ impl Server {
 		for transformer in res_transformers {
 			let path = path.join(transformer);
 			let mut extended_config = config.clone();
-			extended_config
-				.env
-				.get_or_insert(HashMap::default())
-				.insert("STATUS".to_string(), response.status.to_string());
+			let env = extended_config.env.get_or_insert(HashMap::default());
+			env.insert("STATUS".to_string(), response.status.to_string());
+			let request = Request {
+				verb: "GET".to_string(),
+				url: request.url.clone(),
+				headers: response.headers.clone(),
+				body: response.body.clone(),
+			};
 			let res = self.run_cgi(&mut request.clone(), &path, &extended_config);
-			if !res.is_ok() {
-				*response = res;
+			if res.is_ok() {
+				response.body = res.body;
+				for (k, v) in res.headers {
+					if v.is_empty() {
+						response.headers.remove(&k);
+					} else {
+						response.headers.insert(k, v);
+					}
+				}
 			}
 		}
 	}
@@ -351,7 +366,13 @@ impl Server {
 			let path = path.join(transformer);
 			let res = self.run_cgi(request, &path, config);
 			if res.is_ok() {
-				request.headers = res.headers;
+				for (k, v) in res.headers {
+					if v.is_empty() {
+						request.headers.remove(&k);
+					} else {
+						request.headers.insert(k, v);
+					}
+				}
 				request.body = res.body;
 			}
 		}
@@ -389,6 +410,8 @@ fn parse_output_commands(stderr: &[u8], response: &mut Response) {
 		} else if line.starts_with("status ") {
 			let status = line.strip_prefix("status ").unwrap().parse().unwrap_or(500);
 			response.status = status;
+		} else {
+			eprintln!("{}", line);
 		}
 	}
 }
