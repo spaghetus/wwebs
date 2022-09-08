@@ -87,7 +87,7 @@ impl Server {
 						env.push((("HEADER_".to_string() + k).into(), v.into()));
 					}
 					for (k, v) in query_strings {
-						env.push((k.into(), v.into()));
+						env.push((("QUERY_".to_string() + k).into(), v.into()));
 					}
 					env.push(("VERB".into(), request.verb.clone().into()));
 					env.push(("REQUESTED".into(), request.url.path().into()));

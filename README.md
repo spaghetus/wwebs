@@ -18,3 +18,21 @@ wwebs is a weird (but hopefully not too weird) webserver.
 7. Execute the target file, if it is executable, otherwise read it into the response body.
 8. Execute all of the response transformers, first in descending order by depth, then in ascending order by number.
 9. Send the response.
+
+## writing dynamic content
+
+For content to be dynamic, it must have the `o+r` and `o+x` permission bits. Dynamic content is a normal executable file.
+
+Dynamic content receives the following information:
+* `/dev/stdin` - The request body, if applicable.
+* `HEADER_*` - The request headers.
+* `QUERY_*` - The query strings.
+* `VERB` - The verb of the request.
+* `REQUESTED` - The full URL of the request.
+* `STATUS` - The status code of the response, if this content handles responses.
+
+Dynamic content generates the following information:
+* `/dev/stdout` - The response body.
+* `/dev/stderr` - Output commands.
+  * `status ###` - Set the status.
+  * `log ...` - Write a logging message.
