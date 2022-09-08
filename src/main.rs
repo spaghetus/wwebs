@@ -1,5 +1,3 @@
-use std::thread::yield_now;
-
 use structopt::StructOpt;
 use wwebs::{
 	gemini::{GConfig, Gemini},

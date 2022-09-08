@@ -1,11 +1,6 @@
-use std::{
-	collections::HashMap,
-	fs::File,
-	io::{self, BufReader},
-	net::ToSocketAddrs,
-	path::{Path, PathBuf},
-	str::FromStr,
-};
+//! This module implements Gemini protocol support for wwebs.
+
+use std::collections::HashMap;
 
 use crate::{
 	files::wwebs::WWebS,
@@ -49,7 +44,7 @@ impl Protocol for Gemini {
 			tokio::spawn(async move {
 				let tls_stream = tls_acceptor.accept(socket).await;
 				if let Err(e) = tls_stream {
-					eprintln!("Bad request on gemini from {}", remote_addr);
+					eprintln!("Bad request on gemini from {} because {}", remote_addr, e);
 					return;
 				}
 				let mut tls_stream = tls_stream.unwrap();
@@ -64,7 +59,7 @@ impl Protocol for Gemini {
 				}
 				// Handle any errors with the url format
 				let url = match String::from_utf8(url) {
-					Err(e) => {
+					Err(_e) => {
 						tls_stream
 							.write_all(b"59 URL is not UTF8")
 							.await
@@ -72,7 +67,7 @@ impl Protocol for Gemini {
 						return;
 					}
 					Ok(v) => match Url::parse(&v) {
-						Err(e) => {
+						Err(_e) => {
 							tls_stream
 								.write_all(b"59 URL is not valid")
 								.await
@@ -85,7 +80,7 @@ impl Protocol for Gemini {
 
 				// Get the client's certificate
 				let user_cert = match tls_stream.get_ref().peer_certificate() {
-					Err(e) => {
+					Err(_e) => {
 						tls_stream
 							.write_all(b"59 Invalid client cert")
 							.await
@@ -173,15 +168,12 @@ impl From<GRequest> for Request {
 			},
 			headers: {
 				let mut h = HashMap::new();
-				// if let Some(c) = req.user_cert {
-				// 	let digest = c
-				// 		.digest(MessageDigest::sha256())
-				// 		.map_or_else(|_| "invalid".to_string(), |v| base64::encode_block(&v));
-				// 	h.insert("ClientKeyDigest".to_string(), digest);
-				// }
-				// if let Some(host) = req.url.host_str() {
-				// 	h.insert("Host".to_string(), host.to_string());
-				// }
+				if let Some(c) = req.user_cert {
+					h.insert("UserCert".to_string(), c);
+				}
+				if let Some(host) = req.url.host_str() {
+					h.insert("Host".to_string(), host.to_string());
+				}
 				h
 			},
 			body: vec![],
