@@ -45,7 +45,7 @@ impl Protocol for Http {
 	type Config = HttpConfig;
 
 	/// Starts the protocol.
-	async fn run(&mut self, config: Self::Config, server: WWebSServer) -> anyhow::Result<()> {
+	async fn run(self, config: Self::Config, server: WWebSServer) -> anyhow::Result<()> {
 		let addr = SocketAddr::from((config.ip, config.port));
 
 		let make_svc = make_service_fn({

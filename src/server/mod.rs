@@ -31,7 +31,13 @@ impl Server {
 	/// # Panics
 	/// Panics if the path is empty.
 	#[must_use]
-	pub fn run_cgi(&self, request: &mut Request, path: &Path, config: &WWebS) -> Response {
+	pub fn run_cgi(
+		&self,
+		request: &mut Request,
+		path: &Path,
+		config: &WWebS,
+		query_strings: &HashMap<String, String>,
+	) -> Response {
 		// Make path relative
 		let rel_path = path.strip_prefix(&self.workdir).unwrap();
 		// Determine the path "inside" the target CGI binary
@@ -79,6 +85,9 @@ impl Server {
 					let mut env: Vec<(OsString, OsString)> = vec![];
 					for (k, v) in &request.headers {
 						env.push((("HEADER_".to_string() + k).into(), v.into()));
+					}
+					for (k, v) in query_strings {
+						env.push((k.into(), v.into()));
 					}
 					env.push(("VERB".into(), request.verb.clone().into()));
 					env.push(("REQUESTED".into(), request.url.path().into()));
@@ -145,11 +154,25 @@ impl Server {
 			.path_segments()
 			.expect("Unexpected cannot-be-a-base url")
 			.take(segment)
+			.map(|segment| {
+				if let Some(percent_index) = segment.find('%') {
+					&segment[..percent_index]
+				} else {
+					segment
+				}
+			})
 			.collect();
 
 		// Make the path absolute
 		let path = self.workdir.join(path);
 		let mut config = config.clone();
+
+		// Get query strings
+		let query_strings: HashMap<String, String> = request
+			.url
+			.query_pairs()
+			.map(|(a, b)| (a.to_string(), b.to_string()))
+			.collect();
 
 		// Check that the path exists.
 		if !path.exists() {
@@ -181,29 +204,24 @@ impl Server {
 		let mut response: Response = Response::default();
 
 		// Get the files in the directory
-		let files: Vec<String> = if path.is_dir() {
-			let path = path.clone();
-			let files_res: anyhow::Result<_> = (|| {
-				let readdir = std::fs::read_dir(path)?;
-				Ok(readdir
-					.flatten()
-					.map(|v| v.file_name().to_string_lossy().to_string())
-					.collect())
-			})();
-			files_res.unwrap_or_else(|_| vec![])
-		} else {
-			vec![]
-		};
+		let files: Vec<String> = get_files_at(&path);
 
 		// If the path is a dir, perform all pre-request scoped operations.
 		if path.is_dir() {
 			// Extend config if possible
 			Self::extend_config(&mut config, &path);
 			// Evaluate all of the gatekeepers
-			self.eval_gatekeepers(&files, &path, request, &config, &mut response);
+			self.eval_gatekeepers(
+				&files,
+				&path,
+				request,
+				&config,
+				&mut response,
+				&query_strings,
+			);
 			// Execute all of the request transformers, but only if the response isn't already bad.
 			if response.is_ok() {
-				self.eval_req_transformers(&files, &path, request, &config);
+				self.eval_req_transformers(&files, &path, request, &config, &query_strings);
 			}
 			// If the target is a directory and we are at the end, rewrite it to use the index.
 			if response.is_ok()
@@ -222,20 +240,27 @@ impl Server {
 		if response.is_ok() {
 			// Is the target a file?
 			if path.is_file() {
-				response = self.run_file(exec, &path, request, &config);
+				response = self.run_file(exec, &path, request, &config, &query_strings);
 			} else {
 				// The target is a directory, so we move into it.
 				response = self.exec(request, segment + 1, &mut config);
 			}
 		}
 		if path.is_dir() {
-			self.eval_res_transformers(&files, &path, &config, &mut response, request);
+			self.eval_res_transformers(
+				&files,
+				&path,
+				&config,
+				&mut response,
+				request,
+				&query_strings,
+			);
 		}
 		if response.status == 0 {
 			response.status = 200;
 		}
 		// Run the loggers.
-		self.run_loggers(&files, &path, &config, &response, request);
+		self.run_loggers(&files, &path, &config, &response, request, &query_strings);
 		response
 	}
 
@@ -246,6 +271,7 @@ impl Server {
 		config: &WWebS,
 		response: &Response,
 		request: &mut Request,
+		query_strings: &HashMap<String, String>,
 	) {
 		// Get the list of loggers.
 		let mut loggers: Vec<&String> = files.iter().filter(|v| v.starts_with(".logger")).collect();
@@ -258,7 +284,7 @@ impl Server {
 				.env
 				.get_or_insert(HashMap::default())
 				.insert("STATUS".to_string(), response.status.to_string());
-			let _res = self.run_cgi(&mut request.clone(), &path, &extended_config);
+			let _res = self.run_cgi(&mut request.clone(), &path, &extended_config, query_strings);
 		}
 	}
 
@@ -269,6 +295,7 @@ impl Server {
 		config: &WWebS,
 		response: &mut Response,
 		request: &Request,
+		query_strings: &HashMap<String, String>,
 	) {
 		// Get the list of response transformers.
 		let mut res_transformers: Vec<&String> = files
@@ -288,7 +315,7 @@ impl Server {
 				headers: response.headers.clone(),
 				body: response.body.clone(),
 			};
-			let res = self.run_cgi(&mut request.clone(), &path, &extended_config);
+			let res = self.run_cgi(&mut request.clone(), &path, &extended_config, query_strings);
 			if res.is_ok() {
 				response.body = res.body;
 				for (k, v) in res.headers {
@@ -302,7 +329,14 @@ impl Server {
 		}
 	}
 
-	fn run_file(&self, exec: bool, path: &Path, request: &mut Request, config: &WWebS) -> Response {
+	fn run_file(
+		&self,
+		exec: bool,
+		path: &Path,
+		request: &mut Request,
+		config: &WWebS,
+		query_strings: &HashMap<String, String>,
+	) -> Response {
 		// Is the file static?
 		match exec {
 			false => {
@@ -320,7 +354,7 @@ impl Server {
 					}
 				}
 			}
-			true => self.run_cgi(request, path, config),
+			true => self.run_cgi(request, path, config, query_strings),
 		}
 	}
 
@@ -331,6 +365,7 @@ impl Server {
 		request: &Request,
 		config: &WWebS,
 		response: &mut Response,
+		query_strings: &HashMap<String, String>,
 	) {
 		// Get the list of gatekeepers
 		let mut gatekeepers: Vec<&String> = files
@@ -341,7 +376,7 @@ impl Server {
 		// Execute all of the gatekeepers.
 		for gatekeeper in gatekeepers {
 			let path = path.join(gatekeeper);
-			let res = self.run_cgi(&mut request.clone(), &path, config);
+			let res = self.run_cgi(&mut request.clone(), &path, config, query_strings);
 			if !res.is_ok() {
 				*response = res;
 			}
@@ -354,6 +389,7 @@ impl Server {
 		path: &Path,
 		request: &mut Request,
 		config: &WWebS,
+		query_strings: &HashMap<String, String>,
 	) {
 		// Get the list of request transformers.
 		let mut transformers: Vec<&String> = files
@@ -364,7 +400,7 @@ impl Server {
 		// Execute all of the request transformers.
 		for transformer in transformers {
 			let path = path.join(transformer);
-			let res = self.run_cgi(request, &path, config);
+			let res = self.run_cgi(request, &path, config, query_strings);
 			if res.is_ok() {
 				for (k, v) in res.headers {
 					if v.is_empty() {
@@ -388,6 +424,22 @@ impl Server {
 			})();
 			config_res.unwrap_or_else(|_| config.clone())
 		};
+	}
+}
+
+fn get_files_at(path: &Path) -> Vec<String> {
+	if path.is_dir() {
+		let path = path;
+		let files_res: anyhow::Result<_> = (|| {
+			let readdir = std::fs::read_dir(path)?;
+			Ok(readdir
+				.flatten()
+				.map(|v| v.file_name().to_string_lossy().to_string())
+				.collect())
+		})();
+		files_res.unwrap_or_else(|_| vec![])
+	} else {
+		vec![]
 	}
 }
 

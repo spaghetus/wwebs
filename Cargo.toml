@@ -9,12 +9,16 @@ edition = "2021"
 serde = {version = "1.0.144", features = ["derive"]}
 url = {version = "2.2.2", features = ["serde"]}
 async-trait = "0.1.57"
-tokio = {version = "1.20.1", features = ["full"]}
+tokio = {version = "1", features = ["full"]}
 anyhow = "1.0.63"
 toml = {verson = "0.5.9"}
 hyper = {version = "*", optional = true, features = ["full"]}
 subprocess = "0.2.9"
+base64 = {version = "*", optional = true}
+structopt = "0.3.26"
+tokio-native-tls = "*"
 
 [features]
-default = ["http"]
+default = ["http", "gemini"]
 http = ["hyper"]
+gemini = ["base64"]

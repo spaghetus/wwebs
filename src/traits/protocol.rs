@@ -14,5 +14,5 @@ pub trait Protocol {
 	type Config: Default;
 
 	/// Starts the protocol.
-	async fn run(&mut self, config: Self::Config, server: Server) -> anyhow::Result<()>;
+	async fn run(self, config: Self::Config, server: Server) -> anyhow::Result<()>;
 }
