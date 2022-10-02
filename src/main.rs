@@ -38,7 +38,7 @@ async fn main() {
 		))
 	});
 
-	let gem_fut = if let (Some(cert), Some(pass)) = (opt.gem_cert, opt.gem_pass) {
+	let gem_fut = if let (Some(cert), Some(pass)) = (opt.gem_cert.clone(), opt.gem_pass.clone()) {
 		Some(tokio::task::spawn(
 			Gemini.run(GConfig { cert, pass }, server),
 		))
@@ -50,5 +50,9 @@ async fn main() {
 	}
 	if let Some(fut) = http_fut {
 		fut.await.unwrap().expect("HTTP failed");
+	}
+
+	if let (None, None, None) = (opt.http_port, opt.gem_pass, opt.gem_cert) {
+		eprintln!("You need to pass an http port or a Gemini certificate and password for wwebs to do anything");
 	}
 }
