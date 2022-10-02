@@ -74,7 +74,23 @@ impl Http {
 			headers: {
 				r.headers()
 					.iter()
+					.filter(|(k, _)| *k != "Cookie")
 					.map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
+					.chain(
+						r.headers()
+							.iter()
+							.filter(|(k, _)| *k == "Cookie")
+							.filter_map(|(_, v)| {
+								if let Ok(v) = v.to_str() {
+									let pivot = v.find('=').unwrap_or(0);
+									let cookie_key: String = v.chars().take(pivot - 1).collect();
+									let cookie_value = v.chars().skip(pivot).collect();
+									Some((format!("Cookie_{}", cookie_key), cookie_value))
+								} else {
+									None
+								}
+							}),
+					)
 					.collect()
 			},
 			body: hyper::body::to_bytes(r.into_body()).await.unwrap().to_vec(),

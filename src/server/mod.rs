@@ -316,16 +316,15 @@ impl Server {
 				body: response.body.clone(),
 			};
 			let res = self.run_cgi(&mut request.clone(), &path, &extended_config, query_strings);
-			if res.is_ok() {
-				response.body = res.body;
-				for (k, v) in res.headers {
-					if v.is_empty() {
-						response.headers.remove(&k);
-					} else {
-						response.headers.insert(k, v);
-					}
+			response.body = res.body;
+			for (k, v) in res.headers {
+				if v.is_empty() {
+					response.headers.remove(&k);
+				} else {
+					response.headers.insert(k, v);
 				}
 			}
+			response.status = res.status;
 		}
 	}
 
