@@ -36,3 +36,4 @@ Dynamic content generates the following information:
 * `/dev/stderr` - Output commands.
   * `status ###` - Set the status.
   * `log ...` - Write a logging message.
+  * `header key value` - Add a response header.
