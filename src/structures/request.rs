@@ -6,6 +6,8 @@ use url::Url;
 #[derive(Clone)]
 #[non_exhaustive]
 pub struct Request {
+	/// The protocol of the request
+	pub proto: &'static str,
 	/// The "verb" of the request.
 	/// The meaning should be as close to HTTP as possible.
 	/// An empty string is equivalent to "GET".
@@ -21,6 +23,7 @@ pub struct Request {
 impl Default for Request {
 	fn default() -> Self {
 		Self {
+			proto: "Http",
 			verb: String::default(),
 			url: Url::from_str("http://localhost/").unwrap(),
 			headers: HashMap::default(),

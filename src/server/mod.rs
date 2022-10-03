@@ -83,6 +83,7 @@ impl Server {
 				cwd: Some(path.parent().unwrap().as_os_str().to_os_string()),
 				env: Some({
 					let mut env: Vec<(OsString, OsString)> = vec![];
+					env.push(("PROTO".into(), request.proto.into()));
 					for (k, v) in &request.headers {
 						env.push((("HEADER_".to_string() + k).into(), v.into()));
 					}
@@ -310,6 +311,7 @@ impl Server {
 			let env = extended_config.env.get_or_insert(HashMap::default());
 			env.insert("STATUS".to_string(), response.status.to_string());
 			let request = Request {
+				proto: request.proto,
 				verb: "GET".to_string(),
 				url: request.url.clone(),
 				headers: response.headers.clone(),

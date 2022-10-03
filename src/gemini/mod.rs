@@ -155,6 +155,7 @@ impl Default for GConfig {
 impl From<GRequest> for Request {
 	fn from(req: GRequest) -> Self {
 		Request {
+			proto: "Gemini",
 			verb: "GET".to_string(),
 			url: {
 				if req.url.has_authority() {

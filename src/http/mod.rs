@@ -64,6 +64,7 @@ impl Protocol for Http {
 impl Http {
 	async fn handle(server: WWebSServer, r: Request<Body>) -> Result<Response<Body>, Infallible> {
 		let mut request = WWebSRequest {
+			proto: "Http",
 			verb: r.method().to_string(),
 			url: {
 				let http_uri = r.uri();
