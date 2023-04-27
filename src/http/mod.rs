@@ -82,16 +82,19 @@ impl Http {
 						r.headers()
 							.iter()
 							.filter(|(k, _)| *k == "Cookie")
-							.filter_map(|(_, v)| {
-								v.to_str().ok()
-							})
+							.filter_map(|(_, v)| v.to_str().ok())
 							.flat_map(|s| {
 								s.split(';')
-									.map(|s| s.trim())
-									.flat_map(|s| Cookie::parse(s))
+									.map(str::trim)
+									.flat_map(Cookie::parse)
 									.map(|cookie| {
-										(format!("Cookie_{}", cookie.name()), cookie.value().to_string())
-									}).collect::<Vec<_>>().into_iter()
+										(
+											format!("Cookie_{}", cookie.name().replace('-', "_")),
+											cookie.value().to_string(),
+										)
+									})
+									.collect::<Vec<_>>()
+									.into_iter()
 							}),
 					)
 					.collect()
