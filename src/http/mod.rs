@@ -6,6 +6,7 @@ use crate::{
 	structures::{Request as WWebSRequest, Response as WWebSResponse},
 	traits::Protocol,
 };
+use cookie::Cookie;
 use hyper::server::conn::AddrStream;
 use hyper::{
 	body::Bytes,
@@ -82,14 +83,15 @@ impl Http {
 							.iter()
 							.filter(|(k, _)| *k == "Cookie")
 							.filter_map(|(_, v)| {
-								if let Ok(v) = v.to_str() {
-									let pivot = v.find('=').unwrap_or(0);
-									let cookie_key: String = v.chars().take(pivot - 1).collect();
-									let cookie_value = v.chars().skip(pivot).collect();
-									Some((format!("Cookie_{}", cookie_key), cookie_value))
-								} else {
-									None
-								}
+								v.to_str().ok()
+							})
+							.flat_map(|s| {
+								s.split(';')
+									.map(|s| s.trim())
+									.flat_map(|s| Cookie::parse(s))
+									.map(|cookie| {
+										(format!("Cookie_{}", cookie.name()), cookie.value().to_string())
+									}).collect::<Vec<_>>().into_iter()
 							}),
 					)
 					.collect()
