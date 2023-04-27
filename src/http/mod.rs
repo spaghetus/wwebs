@@ -89,7 +89,7 @@ impl Http {
 									.flat_map(Cookie::parse)
 									.map(|cookie| {
 										(
-											format!("Cookie_{}", cookie.name().replace('-', "_")),
+											format!("Cookie_{}", cookie.name()),
 											cookie.value().to_string(),
 										)
 									})
@@ -97,6 +97,7 @@ impl Http {
 									.into_iter()
 							}),
 					)
+					.map(|(name, value)| (name.replace('-', "_"), value))
 					.collect()
 			},
 			body: hyper::body::to_bytes(r.into_body()).await.unwrap().to_vec(),
