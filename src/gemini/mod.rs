@@ -1,6 +1,6 @@
 //! This module implements Gemini protocol support for wwebs.
 
-use std::collections::HashMap;
+use std::{collections::HashMap, io::Read};
 
 use crate::{
 	files::wwebs::WWebS,
@@ -9,12 +9,14 @@ use crate::{
 	traits::Protocol,
 };
 use async_trait::async_trait;
+use openssl::hash::MessageDigest;
 use tokio::{
 	io::{AsyncReadExt, AsyncWriteExt},
 	net::TcpListener,
 };
 use tokio_native_tls::{native_tls::Identity, TlsAcceptor};
 use url::Url;
+use windmark::response::Response as WMResponse;
 
 /// The marker struct for gemini servers.
 pub struct Gemini;
@@ -28,90 +30,50 @@ impl Protocol for Gemini {
 	type Config = GConfig;
 
 	async fn run(self, config: Self::Config, server: Server) -> anyhow::Result<()> {
-		let addr = "0.0.0.0:1965".to_string();
-		let tcp: TcpListener = TcpListener::bind(&addr).await?;
+		windmark::router::Router::new()
+			.set_private_key_file(config.private)
+			.set_certificate_file(config.public)
+			.mount("/*path", {
+				let server = server.clone();
+				move |ctx| {
+					let url = ctx.url.clone();
 
-		let der = std::fs::read(config.cert)?;
-		let cert = Identity::from_pkcs12(&der, &config.pass)?;
-		let tls_acceptor =
-			TlsAcceptor::from(tokio_native_tls::native_tls::TlsAcceptor::builder(cert).build()?);
+					let req = GRequest {
+						url,
+						user_cert: ctx
+							.certificate
+							.and_then(|cert| cert.digest(MessageDigest::sha512()).ok())
+							.map(base64::encode),
+					};
+					let mut req: Request = req.into();
+					let response = server.exec(&mut req, 0, &mut WWebS::default());
 
-		// Begin listening
-		loop {
-			let server = server.clone();
-			let (socket, remote_addr) = tcp.accept().await?;
-			let tls_acceptor = tls_acceptor.clone();
-			tokio::spawn(async move {
-				let tls_stream = tls_acceptor.accept(socket).await;
-				if let Err(e) = tls_stream {
-					eprintln!("Bad request on gemini from {} because {}", remote_addr, e);
-					return;
+					let response = GResponse {
+						body: response.body.clone(),
+						status: match response.status {
+							200 => 20,
+							500 => 50,
+							v => v.try_into().unwrap_or(50),
+						},
+						meta: response
+							.headers
+							.get("X-GeminiMeta")
+							.cloned()
+							.unwrap_or_else(|| "text/gemini".to_owned()),
+					};
+					let meta = response.meta;
+					let mut response = WMResponse::new(response.status, unsafe {
+						String::from_utf8_unchecked(response.body)
+					});
+					response.with_mime(meta);
+					response
 				}
-				let mut tls_stream = tls_stream.unwrap();
-
-				// Read URL
-				let mut url = vec![];
-				while let Ok(byte) = tls_stream.read_u8().await {
-					if byte == b'\r' {
-						break;
-					}
-					url.push(byte);
-				}
-				// Handle any errors with the url format
-				let url = match String::from_utf8(url) {
-					Err(_e) => {
-						tls_stream
-							.write_all(b"59 URL is not UTF8")
-							.await
-							.expect("Failed to write error response");
-						return;
-					}
-					Ok(v) => match Url::parse(&v) {
-						Err(_e) => {
-							tls_stream
-								.write_all(b"59 URL is not valid")
-								.await
-								.expect("Failed to write error response");
-							return;
-						}
-						Ok(u) => u,
-					},
-				};
-
-				// Get the client's certificate
-				let user_cert = match tls_stream.get_ref().peer_certificate() {
-					Err(_e) => {
-						tls_stream
-							.write_all(b"59 Invalid client cert")
-							.await
-							.expect("Failed to write error response");
-						return;
-					}
-					Ok(c) => c.map(|v| base64::encode(v.to_der().unwrap_or_else(|_| vec![]))),
-				};
-
-				let gr = GRequest { url, user_cert };
-				let res = server.exec(&mut gr.into(), 0, &mut WWebS::default());
-				let g_res = GResponse::from(res);
-
-				// Send response
-				if let Err(e) = tls_stream
-					.write_all(format!("{} {}\r\n", g_res.status, g_res.meta).as_bytes())
-					.await
-				{
-					eprintln!("Failed to send header because {}", e);
-				};
-
-				// Send the body
-				if let Err(e) = tls_stream.write_all(&g_res.body).await {
-					eprintln!("Failed to send body because {}", e);
-				};
-
-				if let Err(e) = tls_stream.shutdown().await {
-					eprintln!("Failed to close stream because {}", e);
-				};
-			});
-		}
+			})
+			.set_error_handler(|_error| WMResponse::temporary_failure("Whoopsie"))
+			.run()
+			.await
+			.expect("Gemini run failed");
+		Ok(())
 	}
 }
 
@@ -127,7 +89,7 @@ pub struct GRequest {
 pub struct GResponse {
 	/// The status code for the Gemini response.
 	/// These status codes don't directly map to HTTP status codes, you should read the source code implementing `From<Response> for GResponse` to understand exactly how they're converted.
-	pub status: u8,
+	pub status: i32,
 	/// The metadata for the response.
 	/// This is usually a MIME type.
 	pub meta: String,
@@ -137,17 +99,17 @@ pub struct GResponse {
 
 /// The configuration struct used by the gemini protocol.
 pub struct GConfig {
-	/// The certificate path.
-	pub cert: String,
-	/// The certificate password.
-	pub pass: String,
+	/// The private key.
+	pub private: String,
+	/// The public key.
+	pub public: String,
 }
 
 impl Default for GConfig {
 	fn default() -> Self {
 		Self {
-			cert: "./identity.p12".to_string(),
-			pass: "1234".to_string(),
+			private: "./private.pem".to_string(),
+			public: "public.pem".to_string(),
 		}
 	}
 }
@@ -222,7 +184,7 @@ impl From<Response> for GResponse {
 			_ => 42,
 		};
 		GResponse {
-			status,
+			status: status as i32,
 			meta: {
 				if res.is_ok() {
 					if let Some(gemini_meta) = res.headers.remove("GEMINI_META") {

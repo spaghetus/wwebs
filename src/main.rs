@@ -15,10 +15,11 @@ struct Opts {
 	/// Make sure it isn't in the web directory and o+r, otherwise clients will be able to download it!!!
 	/// Gemini will only be enabled if *both* options are set!!!
 	#[structopt(short, long)]
-	pub gem_cert: Option<String>,
-	/// The password for decrypting the gemini identity.
+	pub gem_priv: Option<String>,
+	/// The location of the Gemini public key.
+	/// Gemini will only be enabled if *both* options are set!!!
 	#[structopt(short = "G", long, env = "GEM_PASS")]
-	pub gem_pass: Option<String>,
+	pub gem_pub: Option<String>,
 }
 
 #[tokio::main]
@@ -38,9 +39,10 @@ async fn main() {
 		))
 	});
 
-	let gem_fut = if let (Some(cert), Some(pass)) = (opt.gem_cert.clone(), opt.gem_pass.clone()) {
+	let gem_fut = if let (Some(private), Some(public)) = (opt.gem_priv.clone(), opt.gem_pub.clone())
+	{
 		Some(tokio::task::spawn(
-			Gemini.run(GConfig { cert, pass }, server),
+			Gemini.run(GConfig { private, public }, server),
 		))
 	} else {
 		None
@@ -52,7 +54,7 @@ async fn main() {
 		fut.await.unwrap().expect("HTTP failed");
 	}
 
-	if let (None, None, None) = (opt.http_port, opt.gem_pass, opt.gem_cert) {
+	if let (None, None, None) = (opt.http_port, opt.gem_priv, opt.gem_pub) {
 		eprintln!("You need to pass an http port or a Gemini certificate and password for wwebs to do anything");
 	}
 }
