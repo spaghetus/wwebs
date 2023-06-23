@@ -16,7 +16,7 @@ use tokio::{
 };
 use tokio_native_tls::{native_tls::Identity, TlsAcceptor};
 use url::Url;
-use windmark::response::Response as WMResponse;
+use windmark::{context::RouteContext, response::Response as WMResponse};
 
 /// The marker struct for gemini servers.
 pub struct Gemini;
@@ -30,45 +30,51 @@ impl Protocol for Gemini {
 	type Config = GConfig;
 
 	async fn run(self, config: Self::Config, server: Server) -> anyhow::Result<()> {
+		let handler = {
+			let server = server.clone();
+			move |ctx: RouteContext| {
+				let url = ctx.url.clone();
+
+				let req = GRequest {
+					url,
+					user_cert: ctx
+						.certificate
+						.and_then(|cert| cert.digest(MessageDigest::sha512()).ok())
+						.map(base64::encode),
+				};
+				let mut req: Request = req.into();
+				let response = server.exec(&mut req, 0, &mut WWebS::default());
+
+				let response = GResponse {
+					body: response.body.clone(),
+					status: match response.status {
+						200 => 20,
+						500 => 50,
+						404 => 40,
+						v => v.try_into().unwrap_or(50),
+					},
+					meta: response
+						.headers
+						.get("X-GeminiMeta")
+						.cloned()
+						.unwrap_or_else(|| "text/gemini".to_owned()),
+				};
+				let meta = response.meta;
+				let status = response.status;
+				let mut response = WMResponse::new(response.status, unsafe {
+					String::from_utf8_unchecked(response.body)
+				});
+				if status == 20 {
+					response.with_mime(meta);
+				}
+				response
+			}
+		};
 		windmark::router::Router::new()
 			.set_private_key_file(config.private)
 			.set_certificate_file(config.public)
-			.mount("/*path", {
-				let server = server.clone();
-				move |ctx| {
-					let url = ctx.url.clone();
-
-					let req = GRequest {
-						url,
-						user_cert: ctx
-							.certificate
-							.and_then(|cert| cert.digest(MessageDigest::sha512()).ok())
-							.map(base64::encode),
-					};
-					let mut req: Request = req.into();
-					let response = server.exec(&mut req, 0, &mut WWebS::default());
-
-					let response = GResponse {
-						body: response.body.clone(),
-						status: match response.status {
-							200 => 20,
-							500 => 50,
-							v => v.try_into().unwrap_or(50),
-						},
-						meta: response
-							.headers
-							.get("X-GeminiMeta")
-							.cloned()
-							.unwrap_or_else(|| "text/gemini".to_owned()),
-					};
-					let meta = response.meta;
-					let mut response = WMResponse::new(response.status, unsafe {
-						String::from_utf8_unchecked(response.body)
-					});
-					response.with_mime(meta);
-					response
-				}
-			})
+			.mount("/*path", handler.clone())
+			.mount("/", handler)
 			.set_error_handler(|_error| WMResponse::temporary_failure("Whoopsie"))
 			.run()
 			.await

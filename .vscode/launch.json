@@ -38,8 +38,15 @@
 					"kind": "bin"
 				}
 			},
-			"args": [],
-			"cwd": "${workspaceFolder}/../wwebs-ethsbell/web"
+			"args": [
+				"-h",
+				"8000",
+				"--gem-priv",
+				"../private.pem",
+				"--gem-pub",
+				"../public.pem"
+			],
+			"cwd": "${workspaceFolder}/../website-2/wwebs-root"
 		},
 		{
 			"type": "lldb",
