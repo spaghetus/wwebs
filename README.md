@@ -1,6 +1,6 @@
 # wwebs - Willow's Web Server
 
-wwebs is a weird (but hopefully not too weird) webserver.
+wwebs is an experimental webserver that I made for prototyping, I use it for my website but you should definitely find something more secure for yours
 
 ## how wwebs works
 
