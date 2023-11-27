@@ -12,14 +12,14 @@ async-trait = "0.1.57"
 tokio = { version = "1", features = ["full"] }
 anyhow = "1.0.63"
 toml = { version = "0.5.9" }
-hyper = { version = "*", optional = true, features = ["full"] }
+hyper = { version = "0.14", optional = true, features = ["full"] }
 subprocess = "0.2.9"
-base64 = { version = "*", optional = true }
+base64 = { version = "0.13", optional = true }
 structopt = "0.3.26"
-tokio-native-tls = "*"
+tokio-native-tls = "0.3"
 cookie = "0.17"
 windmark = "0.3.9"
-openssl = "*"
+openssl = "0.10"
 
 [features]
 default = ["http", "gemini"]
